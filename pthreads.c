@@ -1,12 +1,16 @@
+/*
+    Triangle Counting in Sparse Graphs using pthreads.
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <pthread.h>
 #include "mmio.h"
 #include "coo2csc.h"
 
-#include <pthread.h>
 
 #define MAX_THREAD 1000
 
@@ -29,47 +33,46 @@ uint32_t commons(uint32_t *array1, uint32_t *array2, uint32_t lenarr1, uint32_t 
 }
 
  struct matrix{
-    uint32_t* csc_row;
-    uint32_t* csc_col;
-    uint32_t* c_val;
     int nnz;
     int start;
     int end;
     int id;
+    uint32_t* csc_row;
+    uint32_t* csc_col;
+    uint32_t* c_val;
  };
 
-void *multiplication(void* arg) {
-    struct matrix* mul_matrix = arg; 
+void *multiply(void* argument) {
+    struct matrix* matrix_tm = argument; 
 
-    for(int i = mul_matrix->start; i < mul_matrix->end; i++) {
-      for(int j = 0; j < mul_matrix->csc_col[i+1] - mul_matrix->csc_col[i]; j++) {
-          int current_row = mul_matrix->csc_row[mul_matrix->csc_col[i] + j];
-          int current_col = i;
-          // Calculate A*A
-          int alpha_size = mul_matrix->csc_col[current_row+1] - mul_matrix->csc_col[current_row];
-          int *alpha = malloc((alpha_size) * sizeof(int));
-          int beta_size = mul_matrix->csc_col[current_col+1] - mul_matrix->csc_col[current_col];    
-          int *beta = malloc((beta_size) * sizeof(int));
-          for (int k = 0; k < alpha_size; k++) {
-              alpha[k] = mul_matrix->csc_row[mul_matrix->csc_col[current_row] + k];
-          }
-          for (int k = 0; k < beta_size; k++) {
-              beta[k] = mul_matrix->csc_col[mul_matrix->csc_col[current_col] + k];
-          }
-          
-          int value = (int) commons(alpha, beta, alpha_size, beta_size);     
+    for(int i = matrix_tm->start; i < matrix_tm->end; i++) {
+      for(int j = 0; j < matrix_tm->csc_col[i+1] - matrix_tm->csc_col[i]; j++) {
+            int current_row = matrix_tm->csc_row[matrix_tm->csc_col[i] + j];
+            int current_col = i;
+            int alpha_size = matrix_tm->csc_col[current_row+1] - matrix_tm->csc_col[current_row];
+            int *alpha = malloc((alpha_size) * sizeof(int));  
+            int beta_size = matrix_tm->csc_col[current_col+1] - matrix_tm->csc_col[current_col];    
+            int *beta = malloc((beta_size) * sizeof(int));
+            for(int k = 0; k < alpha_size; k++) {
+                alpha[k] = matrix_tm->csc_row[matrix_tm->csc_col[current_row] + k];
+            }
+            for(int k = 0; k < beta_size; k++) {
+                beta[k] = matrix_tm->csc_row[matrix_tm->csc_col[current_col] + k];
+            }
 
-          if(value) {
-              mul_matrix->c_val[mul_matrix->csc_col[i] + j] = value;
-          }
-      }
+            int value = (int) commons(alpha, beta, alpha_size, beta_size);
+                
+            if(value) {
+                matrix_tm->c_val[matrix_tm->csc_col[i] + j] = value;
+            }
+        }
     } 
     pthread_exit(NULL);
 }
 
 int main(int argc, char* argv[]) {
   
-  int ret_code;
+    int ret_code;
     MM_typecode matcode;
     FILE *f;
     uint32_t M, N, nnz;   
@@ -79,12 +82,12 @@ int main(int argc, char* argv[]) {
     struct timeval start, end;
 
     if (argc < 2) {
-		fprintf(stderr, "Usage: %s [martix-market-filename]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [martix-market-filename] [0 for binary or 1 for non binary] [num of threads]\n", argv[0]);
 		exit(1);
 	} else {
         if ((f = fopen(argv[1], "r")) == NULL) {
             exit(1);
-        }
+        }         
     }
 
     if (mm_read_banner(f, &matcode) != 0) {
@@ -95,38 +98,36 @@ int main(int argc, char* argv[]) {
 
     /*  This is how one can screen matrix types if their application */
     /*  only supports a subset of the Matrix Market data types.      */
-
-    if (mm_is_complex(matcode) && mm_is_matrix(matcode) && mm_is_sparse(matcode)) {
-        printf("Sorry, this application does not support.");
+    if(mm_is_complex(matcode) && mm_is_matrix(matcode) && mm_is_sparse(matcode)) {
+        printf("Sorry, this application does not support ");
         printf("Market Market type: [%s]\n", mm_typecode_to_str(matcode));
         exit(1);
     }
 
     /* find out size of sparse matrix .... */
-
-    if ((ret_code = mm_read_mtx_crd_size(f, &M, &N, &nnz)) != 0) {
+    if((ret_code = mm_read_mtx_crd_size(f, &M, &N, &nnz)) != 0) {
         exit(1);
     }
 
-    /* For the COO */
-    /* Double the memory to store the full matrix */
+    // Reserving memory for COO, CSC, C_CSC matrices 
     I = (uint32_t *) malloc(2 * nnz * sizeof(uint32_t));
     J = (uint32_t *) malloc(2 * nnz * sizeof(uint32_t));
     val = (double *) malloc(nnz * sizeof(double));
     uint32_t* csc_row = (uint32_t *) malloc(2 * nnz * sizeof(uint32_t));
     uint32_t* csc_col = (uint32_t *) malloc((N + 1) * sizeof(uint32_t));
-    uint32_t* c_csc_row = (uint32_t *) malloc(2 * nnz * sizeof(uint32_t));
+    uint32_t* c_cscRow = (uint32_t *) malloc(2 * nnz * sizeof(uint32_t));
     uint32_t* c_val = (uint32_t *) malloc(2 * nnz * sizeof(uint32_t));
-    uint32_t* c_csc_col = (uint32_t *) malloc((N + 1) * sizeof(uint32_t));
+    uint32_t* c_cscColumn = (uint32_t *) malloc((N + 1) * sizeof(uint32_t));
 
-    for (uint32_t i = 0; i < nnz; i++) {
+    
+    for(uint32_t i = 0; i<nnz; i++) {
         /* I is for the rows and J for the columns */
         fscanf(f, "%d %d \n", &I[i], &J[i]);
         I[i]--;  /* adjust from 1-based to 0-based */
         J[i]--;
     }
-    
-    if (f != stdin) {
+
+    if(f != stdin) {
         fclose(f);
     }
 
@@ -146,7 +147,7 @@ int main(int argc, char* argv[]) {
     } else {
         coo2csc(csc_row, csc_col, I, J, 2 * nnz, N, 0);
     }
-
+    
     printf("Loaded matrix. Initializing counting sequence.\n");
 
     // Initializing c3 and results with zeros and e with ones
@@ -154,22 +155,22 @@ int main(int argc, char* argv[]) {
     c3 = malloc(N * sizeof c3);    
     e = malloc(N * sizeof e);  
     results = malloc(N * sizeof results);  
-    for (int i = 0; i < N; i++){
+    for(int i = 0; i < N; i++){
         c3[i] = 0;
         e[i] = 1;
         results[i] = 0;
     }
 
-    /* We measure time from this point */
+    // Time measurements starts here, as we begin the sequence of calculating the Hadamard product and the triangles
     gettimeofday(&start,NULL); 
 
-    //Assign matrix atributes
+    // Attributes assignment
     struct matrix matrix[threads_number];
 
     pthread_t *threads;
     threads = (pthread_t *)malloc(threads_number*sizeof(pthread_t));
 
-    //Parallelize the for loop by breaking it into chunks
+    // Splitting loop
     int chunk = 1;
     if(threads_number > 0) {
         chunk = N / (threads_number);
@@ -183,10 +184,10 @@ int main(int argc, char* argv[]) {
       matrix[i].end = matrix[i].start + chunk;
       matrix[i].nnz = nnz;
       matrix[i].id = i;
-      pthread_create(&threads[i], NULL, multiplication, &matrix[i]);
-      // multiplication(&matrix[i]);
+      pthread_create(&threads[i], NULL, multiply, &matrix[i]);
     }
-    // The last thread is left out so as to calculate the mod of the chunk division!
+
+    // Chunk divison mod
     matrix[threads_number - 1].csc_row = csc_row;
     matrix[threads_number - 1].csc_col = csc_col;
     matrix[threads_number - 1].c_val = c_val;
@@ -194,32 +195,33 @@ int main(int argc, char* argv[]) {
     matrix[threads_number - 1].end = matrix[threads_number - 1].start + chunk + (N % threads_number);
     matrix[threads_number - 1].nnz = nnz;
     matrix[threads_number - 1].id = threads_number - 1;    
-    pthread_create(&threads[threads_number - 1], NULL, multiplication, &matrix[threads_number - 1]);
+    pthread_create(&threads[threads_number - 1], NULL, multiply, &matrix[threads_number - 1]);
 
-    for (int i = 0; i < threads_number; i++) {
-      pthread_join(threads[i], NULL);
+    for(int i = 0; i < threads_number; i++) {
+        pthread_join(threads[i], NULL);
     }
 
-    c_csc_col = csc_col;
-    c_csc_row = csc_row;
+    c_cscColumn = csc_col;
+    c_cscRow = csc_row;
 
-
-    for (int i = 0; i < N; i++) {
-        // printf("i: %d \n", i);
-        for(int j = 0; j < c_csc_col[i+1] - c_csc_col[i]; j++) {
-            int row = c_csc_row[c_csc_col[i] + j];
-            int col = i;
-            int value = c_val[c_csc_col[i] + j];
-            results[row] += value * e[col];
+    //Final Multiplication - no profit taken out of parallelization
+    for(int i = 0; i < N; i++) {
+        for(int j = 0; j < c_cscColumn[i+1] - c_cscColumn[i]; j++) {
+                int row = c_cscRow[c_cscColumn[i] + j];
+                int col = i;
+                int value = c_val[c_cscColumn[i] + j];
+                results[row] += value * e[col]; 
         }
     }
+
     int totalTriangles = 0;
+    
     for(int i = 0; i < N; i++) {
         c3[i] = results[i] / 2;
         totalTriangles += c3[i];
     }
 
-    totalTriangles = totalTriangles / 3;
+    totalTriangles /= 3;
 
     // End of procedure and 'end' timestamp
     gettimeofday(&end, NULL);

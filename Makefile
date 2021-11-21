@@ -22,6 +22,9 @@ openmp: mmio.o coo2csc.o openmp.c
 test: mmio.o coo2csc.o test.c
 	$(CC) $(PTHREADSFLAGS) -o test mmio.c coo2csc.c test.c
 
+.PHONY: clean
+
 all: sequential pthreads openck openmp
 
-clean: rm -f sequential pthreads openck openmp.o example mmio.o coo2csc.o
+clean: 
+	rm -f sequential pthreads openck openmp sequential.o pthreads.o openck.o openmp.o example mmio.o coo2csc.o
